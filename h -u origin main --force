@@ -1,0 +1,7 @@
+[33m503a0b3[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Prepare config for deployment
+[33m0e5fa1b[m Ignore local development appsettings files
+[33mdd4a763[m Ignore local development appsettings files
+[33m81d2d2a[m Persist subscription billing metadata from checkout and webhook flow
+[33m15aa078[m Fix final nullable warning in plans service
+[33m6d828e0[m Clean up nullable warnings in auth and plans flow
+[33ma4592e3[m Initial working backend MVP with AI, admin, billing, and Stripe flow

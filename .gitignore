@@ -1,0 +1,47 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.rsuser
+
+# Build output
+**/bin/
+**/obj/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# SQLite/local database files
+*.db
+*.db-shm
+*.db-wal
+*.sqbpro
+
+# Local env / secrets
+.env
+.env.*
+appsettings.Development.json.local
+
+# Publish output
+publish/
+out/
+
+# Test results
+TestResults/
+
+# Node modules if ever added later
+node_modules/
+
+# Optional local HTTP scratch files
+*.http
+
+# Optional IDE folders
+.idea/
+.vscode/
+
+viral-content-api/appsettings.Development.json
+ViralContentApi.Tests/appsettings.Development.json
