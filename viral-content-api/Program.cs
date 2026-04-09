@@ -171,6 +171,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.MapGet("/health", () => Results.Ok("OK"));
+
 app.UseHttpsRedirection();
 
 app.UseMiddleware<ApiKeyMiddleware>();
