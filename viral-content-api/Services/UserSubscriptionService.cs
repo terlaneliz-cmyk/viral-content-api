@@ -466,13 +466,11 @@ public class UserSubscriptionService : IUserSubscriptionService
         if (user != null && IsPaidOrActiveLikeStatus(normalizedStatus) && !string.IsNullOrWhiteSpace(effectivePlanName))
         {
             user.Plan = effectivePlanName;
-            await _aiUsageLimitService.UpdateUserPlanAsync(userId, effectivePlanName);
         }
 
         if (user != null && IsFreeDowngradeStatus(normalizedStatus))
         {
             user.Plan = "Free";
-            await _aiUsageLimitService.UpdateUserPlanAsync(userId, "Free");
         }
 
         await _context.SaveChangesAsync();
