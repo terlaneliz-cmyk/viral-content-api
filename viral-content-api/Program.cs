@@ -173,7 +173,10 @@ if (app.Environment.IsDevelopment())
 
 app.MapGet("/health", () => Results.Ok("OK"));
 
-app.UseHttpsRedirection();
+if (app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseMiddleware<ApiKeyMiddleware>();
 
@@ -182,6 +185,9 @@ app.UseMiddleware<ActiveUserMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();
+
+app.MapGet("/billing/success", () => Results.Ok("Payment succeeded."));
+app.MapGet("/billing/cancel", () => Results.Ok("Payment canceled."));
 
 app.Run();
 

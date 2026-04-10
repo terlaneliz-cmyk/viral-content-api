@@ -22,35 +22,35 @@ namespace ViralContentApi.Data
             base.OnModelCreating(modelBuilder);
 
             modelBuilder.Entity<WebhookEventLog>(entity =>
-{
-    entity.Property(x => x.Provider).HasMaxLength(50).IsRequired();
-    entity.Property(x => x.EventType).HasMaxLength(200).IsRequired();
-    entity.Property(x => x.ExternalEventId).HasMaxLength(200);
-    entity.Property(x => x.Message).HasMaxLength(1000);
-    entity.Property(x => x.CustomerId).HasMaxLength(200);
-    entity.Property(x => x.SubscriptionId).HasMaxLength(200);
-    entity.Property(x => x.CheckoutSessionId).HasMaxLength(200);
-    entity.Property(x => x.SubscriptionStatus).HasMaxLength(100);
-    entity.Property(x => x.PlanName).HasMaxLength(100);
-    entity.Property(x => x.BillingCycle).HasMaxLength(50);
-});
+            {
+                entity.Property(x => x.Provider).HasMaxLength(50).IsRequired();
+                entity.Property(x => x.EventType).HasMaxLength(200).IsRequired();
+                entity.Property(x => x.ExternalEventId).HasMaxLength(200);
+                entity.Property(x => x.Message).HasMaxLength(1000);
+                entity.Property(x => x.CustomerId).HasMaxLength(200);
+                entity.Property(x => x.SubscriptionId).HasMaxLength(200);
+                entity.Property(x => x.CheckoutSessionId).HasMaxLength(200);
+                entity.Property(x => x.SubscriptionStatus).HasMaxLength(100);
+                entity.Property(x => x.PlanName).HasMaxLength(100);
+                entity.Property(x => x.BillingCycle).HasMaxLength(50);
+            });
 
             modelBuilder.Entity<ProcessedWebhookEvent>(entity =>
-{
-                 entity.HasIndex(x => new { x.Provider, x.ExternalEventId }).IsUnique();
-                 entity.Property(x => x.Provider).HasMaxLength(50).IsRequired();
-                 entity.Property(x => x.ExternalEventId).HasMaxLength(200).IsRequired();
-});
+            {
+                entity.HasIndex(x => new { x.Provider, x.ExternalEventId }).IsUnique();
+                entity.Property(x => x.Provider).HasMaxLength(50).IsRequired();
+                entity.Property(x => x.ExternalEventId).HasMaxLength(200).IsRequired();
+            });
 
             modelBuilder.Entity<Post>()
                 .HasOne<User>()
-                .WithMany()
+                .WithMany(u => u.Posts)
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<AiUsageRecord>()
                 .HasOne(x => x.User)
-                .WithMany()
+                .WithMany(u => u.AiUsageRecords)
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
@@ -60,7 +60,7 @@ namespace ViralContentApi.Data
 
             modelBuilder.Entity<UserSubscription>()
                 .HasOne(x => x.User)
-                .WithMany()
+                .WithMany(u => u.UserSubscriptions)
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
@@ -70,7 +70,7 @@ namespace ViralContentApi.Data
 
             modelBuilder.Entity<BillingEventLog>()
                 .HasOne(x => x.User)
-                .WithMany()
+                .WithMany(u => u.BillingEventLogs)
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.SetNull);
 

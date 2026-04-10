@@ -63,21 +63,29 @@ namespace ViralContentApi.Services
                 throw new ArgumentException("StripePriceLookupKey is required.");
             }
 
-            if (string.IsNullOrWhiteSpace(request.SuccessUrl))
+            var defaultSuccessUrl = "https://viral-content-api-mcnr.onrender.com/billing/success";
+            var defaultCancelUrl = "https://viral-content-api-mcnr.onrender.com/billing/cancel";
+
+            var successUrl = request.SuccessUrl;
+            var cancelUrl = request.CancelUrl;
+
+            if (string.IsNullOrWhiteSpace(successUrl) ||
+                successUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException("SuccessUrl is required.");
+                successUrl = defaultSuccessUrl;
             }
 
-            if (string.IsNullOrWhiteSpace(request.CancelUrl))
+            if (string.IsNullOrWhiteSpace(cancelUrl) ||
+                cancelUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException("CancelUrl is required.");
+                cancelUrl = defaultCancelUrl;
             }
 
             var sessionOptions = new SessionCreateOptions
             {
                 Mode = "subscription",
-                SuccessUrl = request.SuccessUrl,
-                CancelUrl = request.CancelUrl,
+                SuccessUrl = successUrl,
+                CancelUrl = cancelUrl,
                 CustomerEmail = request.CustomerEmail,
                 ClientReferenceId = request.UserId.ToString(),
                 LineItems = new List<SessionLineItemOptions>
@@ -118,12 +126,14 @@ namespace ViralContentApi.Services
             var session = await sessionService.CreateAsync(sessionOptions, requestOptions);
 
             _logger.LogInformation(
-                "Stripe checkout session created. UserId: {UserId}, Plan: {PlanName}, BillingCycle: {BillingCycle}, SessionId: {SessionId}, IdempotencyKey: {IdempotencyKey}",
+                "Stripe checkout session created. UserId: {UserId}, Plan: {PlanName}, BillingCycle: {BillingCycle}, SessionId: {SessionId}, IdempotencyKey: {IdempotencyKey}, SuccessUrl: {SuccessUrl}, CancelUrl: {CancelUrl}",
                 request.UserId,
                 request.PlanName,
                 request.BillingCycle,
                 session.Id,
-                idempotencyKey);
+                idempotencyKey,
+                successUrl,
+                cancelUrl);
 
             return new CreateCheckoutSessionResponse
             {
