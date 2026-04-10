@@ -31,5 +31,8 @@ namespace ViralContentApi.Models
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public List<Post> Posts { get; set; } = new();
+        public List<UserSubscription> UserSubscriptions { get; set; } = new();
+        public List<AiUsageRecord> AiUsageRecords { get; set; } = new();
+        public List<BillingEventLog> BillingEventLogs { get; set; } = new();
     }
 }
