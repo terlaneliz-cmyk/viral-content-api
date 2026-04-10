@@ -36,6 +36,19 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("FrontendPolicy", policy =>
+    {
+        policy
+            .WithOrigins(
+                "http://localhost:5173",
+                "https://localhost:5173")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo
@@ -126,6 +139,7 @@ builder.Services.AddScoped<INotificationHealthService, NotificationHealthService
 builder.Services.AddScoped<INotificationTemplateService, NotificationTemplateService>();
 builder.Services.AddScoped<IBillingEventLogService, BillingEventLogService>();
 builder.Services.AddScoped<BillingNotificationOrchestrator>();
+
 builder.Services.Configure<WebhookMaintenanceSettings>(
     builder.Configuration.GetSection("WebhookMaintenance"));
 
@@ -177,6 +191,8 @@ if (app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
 }
+
+app.UseCors("FrontendPolicy");
 
 app.UseMiddleware<ApiKeyMiddleware>();
 
