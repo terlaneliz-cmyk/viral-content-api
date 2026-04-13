@@ -26,31 +26,33 @@ namespace ViralContentApi.Controllers
         }
 
         [HttpPost("generate")]
-        public async Task<ActionResult<GenerateContentResponse>> Generate([FromBody] GenerateContentRequest request)
+public async Task<IActionResult> Generate([FromBody] GenerateContentRequest request)
+{
+    if (request == null)
+    {
+        return BadRequest(new { message = "Request is null." });
+    }
+
+    try
+    {
+        var result = await _aiContentService.GenerateAsync(request);
+
+        if (result == null)
         {
-            var userId = GetUserId();
-
-            var usageResult = await _aiUsageLimitService.TryConsumeAsync(userId);
-
-            Response.Headers["X-AI-Plan"] = usageResult.Plan;
-            Response.Headers["X-AI-Daily-Limit"] = usageResult.DailyLimit.ToString();
-            Response.Headers["X-AI-Remaining-Today"] = usageResult.RemainingToday.ToString();
-
-            if (!usageResult.Allowed)
-            {
-                return StatusCode(429, new
-                {
-                    message = "Daily AI generation limit reached.",
-                    plan = usageResult.Plan,
-                    dailyLimit = usageResult.DailyLimit,
-                    usedToday = usageResult.UsedToday,
-                    remainingToday = usageResult.RemainingToday
-                });
-            }
-
-            var response = await _aiContentService.GenerateAsync(request);
-            return Ok(response);
+            return BadRequest(new { message = "AI generation returned null." });
         }
+
+        return Ok(result); // ✅ THIS is the key line
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, new
+        {
+            message = "Error generating content.",
+            details = ex.Message
+        });
+    }
+}
 
         [HttpPost("save-as-post")]
         public async Task<ActionResult<PostResponse>> SaveAsPost([FromBody] SaveGeneratedContentAsPostRequest request)

@@ -4,3 +4,19 @@ body {
   color: white;
   font-family: Arial, sans-serif;
 }
+
+* {
+  box-sizing: border-box;
+}
+
+input,
+button {
+  font-size: 16px;
+  border-radius: 6px;
+  border: none;
+}
+
+button {
+  padding: 10px 14px;
+  cursor: pointer;
+}
