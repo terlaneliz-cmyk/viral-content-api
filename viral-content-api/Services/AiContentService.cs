@@ -1,181 +1,103 @@
+using System.Text;
+using System.Text.Json;
+using OpenAI;
+using OpenAI.Chat;
 using ViralContentApi.DTOs;
-using ViralContentApi.Services.Models;
 
 namespace ViralContentApi.Services
 {
     public class AiContentService : IAiContentService
     {
-        private readonly AiTopicProfileBuilder _topicProfileBuilder;
-        private readonly AiStrategyProfileBuilder _strategyProfileBuilder;
-        private readonly AiEngagementTextBuilder _engagementTextBuilder;
-        private readonly AiContentFormatter _contentFormatter;
-        private readonly AiHookBuilder _hookBuilder;
-        private readonly AiBodyBuilder _bodyBuilder;
+        private readonly IConfiguration _configuration;
 
-        public AiContentService(
-            AiTopicProfileBuilder topicProfileBuilder,
-            AiStrategyProfileBuilder strategyProfileBuilder,
-            AiEngagementTextBuilder engagementTextBuilder,
-            AiContentFormatter contentFormatter,
-            AiHookBuilder hookBuilder,
-            AiBodyBuilder bodyBuilder)
+        public AiContentService(IConfiguration configuration)
         {
-            _topicProfileBuilder = topicProfileBuilder;
-            _strategyProfileBuilder = strategyProfileBuilder;
-            _engagementTextBuilder = engagementTextBuilder;
-            _contentFormatter = contentFormatter;
-            _hookBuilder = hookBuilder;
-            _bodyBuilder = bodyBuilder;
+            _configuration = configuration;
         }
 
-        public Task<GenerateContentResponse> GenerateAsync(GenerateContentRequest request)
+        public async Task<GenerateContentResponse> GenerateAsync(GenerateContentRequest request)
         {
-            var topic = Normalize(request.Topic);
-            var platform = NormalizePlatform(request.Platform);
-            var tone = NormalizeTone(request.Tone);
-            var goal = NormalizeGoal(request.Goal);
-            var contentType = NormalizeContentType(request.ContentType);
-            var targetAudience = Normalize(request.TargetAudience);
+            var apiKey = _configuration["OpenAI:ApiKey"];
 
-            if (string.IsNullOrWhiteSpace(topic))
+            if (string.IsNullOrWhiteSpace(apiKey))
             {
-                topic = "content creation";
+                throw new Exception("OpenAI API key not configured.");
             }
 
-            var variants = BuildVariants(
-                topic,
-                platform,
-                tone,
-                goal,
-                contentType,
-                targetAudience,
-                request.NumberOfVariants);
+            var client = new OpenAIClient(apiKey);
 
-            var response = new GenerateContentResponse
+            var prompt = BuildPrompt(request);
+
+            var chatRequest = new ChatRequest
             {
-                Topic = topic,
-                Platform = platform,
-                Tone = tone,
-                Variants = variants
-            };
-
-            return Task.FromResult(response);
-        }
-
-        private List<GeneratedContentVariantResponse> BuildVariants(
-            string topic,
-            string platform,
-            string tone,
-            string goal,
-            string contentType,
-            string targetAudience,
-            int numberOfVariants)
-        {
-            var safeVariantCount = Math.Clamp(numberOfVariants <= 0 ? 3 : numberOfVariants, 1, 12);
-
-            var topicProfile = _topicProfileBuilder.Build(topic);
-            var strategyProfile = _strategyProfileBuilder.Build(platform, goal, contentType);
-
-            var variants = new List<GeneratedContentVariantResponse>();
-
-            for (int i = 1; i <= safeVariantCount; i++)
-            {
-                var styleIndex = ((i - 1) % 6) + 1;
-
-                var hook = _hookBuilder.BuildHook(
-                    styleIndex,
-                    i,
-                    topic,
-                    platform,
-                    tone,
-                    goal,
-                    contentType,
-                    targetAudience,
-                    topicProfile,
-                    strategyProfile);
-
-                var body = _bodyBuilder.BuildBody(
-                    styleIndex,
-                    i,
-                    topic,
-                    platform,
-                    tone,
-                    goal,
-                    contentType,
-                    targetAudience,
-                    topicProfile,
-                    strategyProfile);
-
-                var content = _contentFormatter.FormatContentForPlatformAndType(body, platform, contentType, i);
-                var cta = _engagementTextBuilder.BuildCallToAction(i, platform, goal, contentType, targetAudience, strategyProfile);
-                var hashtags = _engagementTextBuilder.BuildHashtags(topic, platform, topicProfile);
-
-                variants.Add(new GeneratedContentVariantResponse
+                Model = "gpt-4o-mini",
+                Messages = new List<Message>
                 {
-                    VariantNumber = i,
-                    Hook = hook,
-                    Content = content,
-                    CallToAction = cta,
-                    Hashtags = hashtags
-                });
+                    new Message(Role.System, "You are a world-class viral content creator. No fluff. No generic advice. Sharp, punchy, high-retention content."),
+                    new Message(Role.User, prompt)
+                },
+                Temperature = 0.9
+            };
+
+            var response = await client.ChatEndpoint.GetCompletionAsync(chatRequest);
+
+            var content = response.FirstChoice.Message.Content;
+
+            var parsed = JsonSerializer.Deserialize<GenerateContentResponse>(content, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (parsed == null)
+            {
+                throw new Exception("Failed to parse AI response.");
             }
 
-            return variants;
+            return parsed;
         }
 
-        private string Normalize(string? value)
+        private string BuildPrompt(GenerateContentRequest request)
         {
-            return value?.Trim() ?? string.Empty;
-        }
+            var sb = new StringBuilder();
 
-        private string NormalizePlatform(string? value)
-        {
-            var normalized = value?.Trim().ToLowerInvariant() ?? string.Empty;
+            sb.AppendLine("Generate viral social media content.");
+            sb.AppendLine("Return ONLY valid JSON. No explanations.");
 
-            return normalized switch
-            {
-                "twitter" => "x",
-                "x/twitter" => "x",
-                "x (twitter)" => "x",
-                _ => normalized
-            };
-        }
+            sb.AppendLine("Format:");
+            sb.AppendLine(@"
+{
+  ""topic"": ""string"",
+  ""platform"": ""string"",
+  ""tone"": ""string"",
+  ""variants"": [
+    {
+      ""variantNumber"": 1,
+      ""hook"": ""string"",
+      ""content"": ""string"",
+      ""callToAction"": ""string"",
+      ""hashtags"": [""#tag""]
+    }
+  ]
+}
+");
 
-        private string NormalizeTone(string? value)
-        {
-            var normalized = value?.Trim().ToLowerInvariant() ?? string.Empty;
+            sb.AppendLine($"Topic: {request.Topic}");
+            sb.AppendLine($"Platform: {request.Platform}");
+            sb.AppendLine($"Tone: {request.Tone}");
+            sb.AppendLine($"Goal: {request.Goal}");
+            sb.AppendLine($"ContentType: {request.ContentType}");
+            sb.AppendLine($"TargetAudience: {request.TargetAudience}");
+            sb.AppendLine($"Variants: {request.NumberOfVariants}");
 
-            return normalized switch
-            {
-                "casual" => "friendly",
-                "expert" => "professional",
-                _ => normalized
-            };
-        }
+            sb.AppendLine("Rules:");
+            sb.AppendLine("- Hook must be strong and scroll-stopping");
+            sb.AppendLine("- No generic phrases");
+            sb.AppendLine("- Content must be specific and practical");
+            sb.AppendLine("- Use short punchy sentences");
+            sb.AppendLine("- Avoid fluff and repetition");
+            sb.AppendLine("- Write like a top creator, not like AI");
 
-        private string NormalizeGoal(string? value)
-        {
-            var normalized = value?.Trim().ToLowerInvariant() ?? string.Empty;
-
-            return normalized switch
-            {
-                "" => "engagement",
-                "sales" => "leads",
-                _ => normalized
-            };
-        }
-
-        private string NormalizeContentType(string? value)
-        {
-            var normalized = value?.Trim().ToLowerInvariant() ?? string.Empty;
-
-            return normalized switch
-            {
-                "" => "post",
-                "tweet thread" => "thread",
-                "idea" => "video idea",
-                _ => normalized
-            };
+            return sb.ToString();
         }
     }
 }

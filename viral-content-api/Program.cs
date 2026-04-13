@@ -121,13 +121,7 @@ builder.Services.Configure<StripeUrlsSettings>(
 builder.Services.AddScoped<IContentService, ContentService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAiContentService, AiContentService>();
-builder.Services.AddScoped<AiTopicProfileBuilder>();
-builder.Services.AddScoped<AiStrategyProfileBuilder>();
 builder.Services.AddScoped<AiProfileTextBuilder>();
-builder.Services.AddScoped<AiEngagementTextBuilder>();
-builder.Services.AddScoped<AiContentFormatter>();
-builder.Services.AddScoped<AiHookBuilder>();
-builder.Services.AddScoped<AiBodyBuilder>();
 builder.Services.AddScoped<IAiUsageLimitService, AiUsageLimitService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IAdminOpsService, AdminOpsService>();

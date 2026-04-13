@@ -41,8 +41,7 @@ function App() {
         }
       });
 
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : null;
+      const data = await res.json();
 
       if (!res.ok) {
         setMyPlan(null);
@@ -80,8 +79,7 @@ function App() {
         body: JSON.stringify(loginData)
       });
 
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : null;
+      const data = await res.json();
 
       if (!res.ok) {
         setLoginMessage(data?.message || "Login failed.");
@@ -111,7 +109,7 @@ function App() {
     setGeneratorMessage("Generating...");
 
     try {
-      const res = await fetch(`${API_BASE}/api/AiContent/generate`, {
+      const res = await fetch(`${API_BASE}/api/Ai/generate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -120,45 +118,25 @@ function App() {
         body: JSON.stringify(generatorData)
       });
 
-      const rawText = await res.text();
-
-let data = null;
-
-try {
-  data = JSON.parse(rawText);
-} catch {
-  // backend returned plain text → show it directly
-  setGeneratorMessage(`Backend response: ${rawText}`);
-  setLoading(false);
-  return;
-}
+      const data = await res.json();
 
       if (res.status === 429) {
-        setGeneratorMessage(
-          typeof data === "string"
-            ? data
-            : data?.message || "Daily limit reached. Upgrade your plan."
-        );
+        setGeneratorMessage(data?.message || "Daily limit reached. Upgrade your plan.");
         setLoading(false);
         return;
       }
 
       if (!res.ok) {
-        if (typeof data === "string") {
-          setGeneratorMessage(`Generation failed: ${data}`);
-        } else {
-          setGeneratorMessage(
-            data?.message ||
-              data?.title ||
-              JSON.stringify(data) ||
-              "Generation failed."
-          );
-        }
+        setGeneratorMessage(
+          data?.message ||
+          data?.title ||
+          "Generation failed."
+        );
         setLoading(false);
         return;
       }
 
-      if (!data || !data.variants || !Array.isArray(data.variants)) {
+      if (!data?.variants || !Array.isArray(data.variants)) {
         setGeneratorMessage("Generation returned an unexpected response.");
         setLoading(false);
         return;
@@ -323,7 +301,7 @@ try {
                   key={v.variantNumber}
                   style={{ border: "1px solid #333", padding: 12, marginBottom: 12, borderRadius: 8 }}
                 >
-                  <h4>Variant {v.variantNumber + 1}</h4>
+                  <h4>Variant {v.variantNumber}</h4>
                   <p><strong>Hook:</strong> {v.hook}</p>
                   <p>{v.content}</p>
                   <p><strong>CTA:</strong> {v.callToAction}</p>
