@@ -44,14 +44,15 @@ public async Task<IActionResult> Generate([FromBody] GenerateContentRequest requ
 
         return Ok(result); // ✅ THIS is the key line
     }
-    catch (Exception ex)
+   catch (Exception ex)
+{
+    return StatusCode(500, new
     {
-        return StatusCode(500, new
-        {
-            message = "Error generating content.",
-            details = ex.Message
-        });
-    }
+        message = "Error generating content.",
+        details = ex.Message,
+        stack = ex.StackTrace
+    });
+}
 }
 
         [HttpPost("save-as-post")]
