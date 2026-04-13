@@ -23,7 +23,7 @@ namespace ViralContentApi.Services
                 throw new InvalidOperationException("OpenAI API key not configured.");
             }
 
-            var client = new ChatClient(model: "gpt-4o-mini", apiKey: apiKey);
+            var client = new ChatClient(model: "gpt-4.1-mini", apiKey: apiKey);
 
             string prompt = BuildPrompt(request);
 
