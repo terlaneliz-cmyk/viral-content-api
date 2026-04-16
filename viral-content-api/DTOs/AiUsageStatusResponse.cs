@@ -12,5 +12,6 @@ namespace ViralContentApi.DTOs
 
         // Keep compatibility with any newer code too
         public bool CanUse { get; set; }
+        public int ReferralBonus { get; set; }
     }
 }

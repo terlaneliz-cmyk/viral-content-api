@@ -43,7 +43,10 @@ public interface IUserSubscriptionService
         DateTime? currentPeriodStartUtc = null,
         DateTime? currentPeriodEndUtc = null);
 
+    Task<UserSubscriptionResponse?> ActivateReferralRewardTrialAsync(int userId);
+
     Task<UserSubscriptionResponse?> RequestCancelAtPeriodEndAsync(int userId);
+    Task<UserSubscriptionResponse?> ReactivateSubscriptionAsync(int userId);
     Task<UserSubscriptionResponse?> CancelSubscriptionImmediatelyAsync(int userId);
 
     Task<int> ProcessExpiredSubscriptionsAsync();

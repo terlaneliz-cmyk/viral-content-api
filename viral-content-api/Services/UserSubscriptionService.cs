@@ -129,6 +129,8 @@ public class UserSubscriptionService : IUserSubscriptionService
                 PlanName = normalizedPlanName,
                 BillingCycle = normalizedBillingCycle,
                 Status = "pending",
+                ExternalSubscriptionId = externalSubscriptionId ?? string.Empty,
+                ExternalCustomerId = externalCustomerId ?? string.Empty,
                 CurrentPeriodStartUtc = currentPeriodStartUtc,
                 CurrentPeriodEndUtc = currentPeriodEndUtc,
                 CancelAtPeriodEnd = false,
@@ -142,6 +144,16 @@ public class UserSubscriptionService : IUserSubscriptionService
             subscription.PlanName = normalizedPlanName;
             subscription.BillingCycle = normalizedBillingCycle;
             subscription.Status = "pending";
+
+            if (!string.IsNullOrWhiteSpace(externalSubscriptionId))
+            {
+                subscription.ExternalSubscriptionId = externalSubscriptionId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(externalCustomerId))
+            {
+                subscription.ExternalCustomerId = externalCustomerId;
+            }
 
             if (currentPeriodStartUtc.HasValue)
             {
@@ -181,6 +193,8 @@ public class UserSubscriptionService : IUserSubscriptionService
                 PlanName = normalizedPlanName,
                 BillingCycle = normalizedBillingCycle,
                 Status = "active",
+                ExternalSubscriptionId = externalSubscriptionId ?? string.Empty,
+                ExternalCustomerId = externalCustomerId ?? string.Empty,
                 CurrentPeriodStartUtc = currentPeriodStartUtc,
                 CurrentPeriodEndUtc = currentPeriodEndUtc,
                 CancelAtPeriodEnd = false,
@@ -196,6 +210,16 @@ public class UserSubscriptionService : IUserSubscriptionService
             subscription.BillingCycle = normalizedBillingCycle;
             subscription.Status = "active";
 
+            if (!string.IsNullOrWhiteSpace(externalSubscriptionId))
+            {
+                subscription.ExternalSubscriptionId = externalSubscriptionId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(externalCustomerId))
+            {
+                subscription.ExternalCustomerId = externalCustomerId;
+            }
+
             if (currentPeriodStartUtc.HasValue)
             {
                 subscription.CurrentPeriodStartUtc = currentPeriodStartUtc;
@@ -207,6 +231,7 @@ public class UserSubscriptionService : IUserSubscriptionService
             }
 
             subscription.CancelAtPeriodEnd = false;
+            subscription.CancelRequestedAtUtc = null;
             subscription.ActivatedAtUtc ??= DateTime.UtcNow;
         }
 
@@ -216,6 +241,102 @@ public class UserSubscriptionService : IUserSubscriptionService
             user.Plan = normalizedPlanName;
             await _aiUsageLimitService.UpdateUserPlanAsync(userId, normalizedPlanName);
         }
+
+        await _context.SaveChangesAsync();
+        return MapToResponse(subscription);
+    }
+
+    public async Task<UserSubscriptionResponse?> ActivateReferralRewardTrialAsync(int userId)
+    {
+        const string rewardEventType = "referral_reward_trial_granted";
+        const int trialDays = 14;
+
+        var alreadyRewarded = await _context.BillingEventLogs
+            .AnyAsync(x =>
+                x.UserId == userId &&
+                x.EventType == rewardEventType &&
+                x.Success);
+
+        if (alreadyRewarded)
+        {
+            return null;
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(x => x.Id == userId);
+        if (user == null)
+        {
+            return null;
+        }
+
+        if (!string.Equals(user.Plan, "Free", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var now = DateTime.UtcNow;
+
+        var subscription = await _context.UserSubscriptions
+            .FirstOrDefaultAsync(x => x.UserId == userId);
+
+        if (subscription == null)
+        {
+            subscription = new UserSubscription
+            {
+                UserId = userId,
+                PlanName = "Pro",
+                BillingCycle = "monthly",
+                Status = "trialing",
+                Price = 0,
+                Currency = "usd",
+                StripePriceLookupKey = string.Empty,
+                ExternalCheckoutSessionId = string.Empty,
+                ExternalCustomerId = string.Empty,
+                ExternalSubscriptionId = string.Empty,
+                CreatedAtUtc = now,
+                ActivatedAtUtc = now,
+                CurrentPeriodStartUtc = now,
+                CurrentPeriodEndUtc = now.AddDays(trialDays),
+                CancelAtPeriodEnd = false,
+                CancelRequestedAtUtc = null
+            };
+
+            _context.UserSubscriptions.Add(subscription);
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(subscription.ExternalSubscriptionId) ||
+                !string.IsNullOrWhiteSpace(subscription.ExternalCustomerId) ||
+                !string.IsNullOrWhiteSpace(subscription.ExternalCheckoutSessionId))
+            {
+                return null;
+            }
+
+            subscription.PlanName = "Pro";
+            subscription.BillingCycle = "monthly";
+            subscription.Status = "trialing";
+            subscription.Price = 0;
+            subscription.Currency = "usd";
+            subscription.StripePriceLookupKey = string.Empty;
+            subscription.ActivatedAtUtc ??= now;
+            subscription.CurrentPeriodStartUtc = now;
+            subscription.CurrentPeriodEndUtc = now.AddDays(trialDays);
+            subscription.CancelAtPeriodEnd = false;
+            subscription.CancelRequestedAtUtc = null;
+        }
+
+        user.Plan = "Pro";
+        await _aiUsageLimitService.UpdateUserPlanAsync(userId, "Pro");
+
+        _context.BillingEventLogs.Add(new BillingEventLog
+        {
+            UserId = userId,
+            EventType = rewardEventType,
+            Status = "success",
+            Success = true,
+            Message = $"Free Pro trial granted for reaching referral threshold. Days={trialDays}",
+            Metadata = $"Plan=Pro; Status=trialing; TrialDays={trialDays}",
+            CreatedAtUtc = now
+        });
 
         await _context.SaveChangesAsync();
         return MapToResponse(subscription);
@@ -237,6 +358,35 @@ public class UserSubscriptionService : IUserSubscriptionService
         if (string.Equals(subscription.Status, "active", StringComparison.OrdinalIgnoreCase))
         {
             subscription.Status = "canceling";
+        }
+
+        await _context.SaveChangesAsync();
+        return MapToResponse(subscription);
+    }
+
+    public async Task<UserSubscriptionResponse?> ReactivateSubscriptionAsync(int userId)
+    {
+        var subscription = await _context.UserSubscriptions
+            .FirstOrDefaultAsync(x => x.UserId == userId);
+
+        if (subscription == null)
+        {
+            return null;
+        }
+
+        subscription.CancelAtPeriodEnd = false;
+        subscription.CancelRequestedAtUtc = null;
+
+        if (string.Equals(subscription.Status, "canceling", StringComparison.OrdinalIgnoreCase))
+        {
+            subscription.Status = "active";
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(x => x.Id == userId);
+        if (user != null && !string.IsNullOrWhiteSpace(subscription.PlanName))
+        {
+            user.Plan = subscription.PlanName;
+            await _aiUsageLimitService.UpdateUserPlanAsync(userId, subscription.PlanName);
         }
 
         await _context.SaveChangesAsync();
@@ -379,6 +529,8 @@ public class UserSubscriptionService : IUserSubscriptionService
                 Status = normalizedStatus,
                 PlanName = normalizedPlanName ?? "Free",
                 BillingCycle = normalizedBillingCycle ?? "monthly",
+                ExternalSubscriptionId = externalSubscriptionId ?? string.Empty,
+                ExternalCustomerId = externalCustomerId ?? string.Empty,
                 ExternalCheckoutSessionId = externalCheckoutSessionId ?? string.Empty,
                 Price = price ?? 0,
                 Currency = string.IsNullOrWhiteSpace(currency) ? string.Empty : currency.Trim(),
@@ -404,6 +556,16 @@ public class UserSubscriptionService : IUserSubscriptionService
             if (!string.IsNullOrWhiteSpace(normalizedBillingCycle))
             {
                 subscription.BillingCycle = normalizedBillingCycle;
+            }
+
+            if (!string.IsNullOrWhiteSpace(externalSubscriptionId))
+            {
+                subscription.ExternalSubscriptionId = externalSubscriptionId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(externalCustomerId))
+            {
+                subscription.ExternalCustomerId = externalCustomerId;
             }
 
             if (!string.IsNullOrWhiteSpace(externalCheckoutSessionId))
@@ -444,6 +606,11 @@ public class UserSubscriptionService : IUserSubscriptionService
             if (subscription.CancelAtPeriodEnd && !subscription.CancelRequestedAtUtc.HasValue)
             {
                 subscription.CancelRequestedAtUtc = DateTime.UtcNow;
+            }
+
+            if (!subscription.CancelAtPeriodEnd)
+            {
+                subscription.CancelRequestedAtUtc = null;
             }
 
             if (IsActivatedLikeStatus(normalizedStatus))
@@ -541,6 +708,7 @@ public class UserSubscriptionService : IUserSubscriptionService
         {
             "free" => "Free",
             "pro" => "Pro",
+            "creator" => "Creator",
             "agency" => "Agency",
             _ => normalized
         };

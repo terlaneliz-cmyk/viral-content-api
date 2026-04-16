@@ -15,6 +15,9 @@ namespace ViralContentApi.Models
         public string StripePriceLookupKey { get; set; } = string.Empty;
         public string ExternalCheckoutSessionId { get; set; } = string.Empty;
 
+        public string ExternalCustomerId { get; set; } = string.Empty;
+        public string ExternalSubscriptionId { get; set; } = string.Empty;
+
         public DateTime CreatedAtUtc { get; set; }
         public DateTime? ActivatedAtUtc { get; set; }
         public DateTime? CurrentPeriodStartUtc { get; set; }

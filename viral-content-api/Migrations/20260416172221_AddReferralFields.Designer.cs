@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ViralContentApi.Data;
 
@@ -10,9 +11,11 @@ using ViralContentApi.Data;
 namespace viral_content_api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260416172221_AddReferralFields")]
+    partial class AddReferralFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.8");
@@ -232,14 +235,8 @@ namespace viral_content_api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("BestStreak")
-                        .HasColumnType("INTEGER");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
-
-                    b.Property<int>("CurrentStreak")
-                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime?>("DeactivatedAt")
                         .HasColumnType("TEXT");
@@ -254,9 +251,6 @@ namespace viral_content_api.Migrations
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("LastActiveDateUtc")
-                        .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastBillingActionAt")
                         .HasColumnType("TEXT");
@@ -285,9 +279,6 @@ namespace viral_content_api.Migrations
 
                     b.Property<int>("ReferralSignupCount")
                         .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("ReferralTrialEndsAtUtc")
-                        .HasColumnType("TEXT");
 
                     b.Property<int?>("ReferredByUserId")
                         .HasColumnType("INTEGER");

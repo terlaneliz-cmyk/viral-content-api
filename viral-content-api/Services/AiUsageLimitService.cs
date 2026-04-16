@@ -64,7 +64,22 @@ namespace ViralContentApi.Services
                 .FirstOrDefaultAsync(x => x.Id == userId);
 
             var plan = string.IsNullOrWhiteSpace(user?.Plan) ? "Free" : user!.Plan;
-            var dailyLimit = GetDailyLimitForPlan(plan);
+            var baseDailyLimit = GetDailyLimitForPlan(plan);
+
+            var referralSignupCount = Math.Max(0, user?.ReferralSignupCount ?? 0);
+            var referralBonus = referralSignupCount * 3;
+
+            var streakBonus = 0;
+            if ((user?.CurrentStreak ?? 0) >= 14)
+            {
+                streakBonus = 2;
+            }
+            else if ((user?.CurrentStreak ?? 0) >= 7)
+            {
+                streakBonus = 1;
+            }
+
+            var totalDailyLimit = baseDailyLimit + referralBonus + streakBonus;
             var utcToday = DateTime.UtcNow.Date;
 
             var usageRecord = await _context.AiUsageRecords
@@ -72,17 +87,18 @@ namespace ViralContentApi.Services
                 .FirstOrDefaultAsync(x => x.UserId == userId && x.UsageDateUtc == utcToday);
 
             var usedToday = usageRecord?.UsedCount ?? 0;
-            var remainingToday = Math.Max(0, dailyLimit - usedToday);
+            var remainingToday = Math.Max(0, totalDailyLimit - usedToday);
             var allowed = remainingToday > 0;
 
             return new AiUsageStatusResponse
             {
                 Plan = plan,
-                DailyLimit = dailyLimit,
+                DailyLimit = totalDailyLimit,
                 UsedToday = usedToday,
                 RemainingToday = remainingToday,
                 Allowed = allowed,
-                CanUse = allowed
+                CanUse = allowed,
+                ReferralBonus = referralBonus
             };
         }
 

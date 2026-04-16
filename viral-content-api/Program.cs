@@ -6,6 +6,8 @@ using ViralContentApi.Data;
 using ViralContentApi.Middleware;
 using ViralContentApi.Models;
 using ViralContentApi.Services;
+// ADD THIS using
+using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +18,33 @@ var jwtSettings = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSettings["Key"] ?? throw new InvalidOperationException("JWT Key is not configured.");
 var jwtIssuer = jwtSettings["Issuer"] ?? throw new InvalidOperationException("JWT Issuer is not configured.");
 var jwtAudience = jwtSettings["Audience"] ?? throw new InvalidOperationException("JWT Audience is not configured.");
+
+var frontendBaseUrl =
+    builder.Configuration["Frontend:BaseUrl"] ??
+    builder.Configuration["App:FrontendBaseUrl"] ??
+    builder.Configuration["ClientAppUrl"] ??
+    builder.Configuration["FrontendBaseUrl"];
+
+var stripeSecretKey =
+    builder.Configuration["Stripe:SecretKey"] ??
+    builder.Configuration["StripeBilling:SecretKey"];
+
+var stripeWebhookSecret =
+    builder.Configuration["Stripe:WebhookSecret"] ??
+    builder.Configuration["StripeBilling:WebhookSecret"];
+
+var allowedOrigins = new List<string>
+{
+    "http://localhost:5173",
+    "https://localhost:5173",
+    "http://localhost:5174",
+    "https://localhost:5174"
+};
+
+if (!string.IsNullOrWhiteSpace(frontendBaseUrl))
+{
+    allowedOrigins.Add(frontendBaseUrl.TrimEnd('/'));
+}
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -40,12 +69,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("FrontendPolicy", policy =>
     {
+        var origins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? [];
+
         policy
-            .WithOrigins(
-                "http://localhost:5173",
-                "https://localhost:5173",
-                "http://localhost:5174",
-                "https://localhost:5174")
+            .WithOrigins(origins)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -118,6 +145,9 @@ builder.Services.Configure<StripeBillingSettings>(
 builder.Services.Configure<StripeUrlsSettings>(
     builder.Configuration.GetSection("StripeUrls"));
 
+builder.Services.Configure<WebhookMaintenanceSettings>(
+    builder.Configuration.GetSection("WebhookMaintenance"));
+
 builder.Services.AddScoped<IContentService, ContentService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAiContentService, AiContentService>();
@@ -136,8 +166,7 @@ builder.Services.AddScoped<INotificationTemplateService, NotificationTemplateSer
 builder.Services.AddScoped<IBillingEventLogService, BillingEventLogService>();
 builder.Services.AddScoped<BillingNotificationOrchestrator>();
 
-builder.Services.Configure<WebhookMaintenanceSettings>(
-    builder.Configuration.GetSection("WebhookMaintenance"));
+builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddScoped<IWebhookMaintenanceService, WebhookMaintenanceService>();
 builder.Services.AddHostedService<WebhookMaintenanceBackgroundService>();
@@ -171,6 +200,41 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.Migrate();
+
+    var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+
+    var adminEmail = config["Admin:Email"];
+    var adminPassword = config["Admin:Password"];
+
+    if (!string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword))
+    {
+        var existingAdmin = dbContext.Users.FirstOrDefault(x => x.Email == adminEmail);
+
+        if (existingAdmin == null)
+        {
+            var hasher = new PasswordHasher<User>();
+
+            var adminUser = new User
+            {
+                Email = adminEmail,
+                Username = "admin",
+                Role = "Admin",
+                Plan = "Creator",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            adminUser.PasswordHash = hasher.HashPassword(adminUser, adminPassword);
+
+            dbContext.Users.Add(adminUser);
+            dbContext.SaveChanges();
+        }
+        else if (existingAdmin.Role != "Admin")
+        {
+            existingAdmin.Role = "Admin";
+            dbContext.SaveChanges();
+        }
+    }
 }
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
@@ -181,14 +245,28 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.MapGet("/health", () => Results.Ok("OK"));
-
-if (app.Environment.IsDevelopment())
+app.MapGet("/health", (IConfiguration configuration) =>
 {
-    app.UseHttpsRedirection();
-}
+    var health = new
+    {
+        status = "OK",
+        environment = app.Environment.EnvironmentName,
+        frontendBaseUrlConfigured = !string.IsNullOrWhiteSpace(frontendBaseUrl),
+        jwtConfigured = !string.IsNullOrWhiteSpace(jwtKey) &&
+                        !string.IsNullOrWhiteSpace(jwtIssuer) &&
+                        !string.IsNullOrWhiteSpace(jwtAudience),
+        stripeProvider = billingProvider,
+        stripeSecretConfigured = !string.IsNullOrWhiteSpace(stripeSecretKey),
+        stripeWebhookConfigured = !string.IsNullOrWhiteSpace(stripeWebhookSecret),
+        corsOrigins = allowedOrigins.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+    };
+
+    return Results.Ok(health);
+});
 
 app.UseCors("FrontendPolicy");
+
+// app.UseHttpsRedirection();
 
 app.UseMiddleware<ApiKeyMiddleware>();
 

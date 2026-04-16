@@ -8,6 +8,15 @@ namespace ViralContentApi.DTOs
         public int UsedToday { get; set; }
         public int RemainingToday { get; set; }
         public bool IsLimitReached { get; set; }
+
+        public int ReferralBonus { get; set; }
+
+        public bool IsReferralTrialActive { get; set; }
+        public DateTime? ReferralTrialEndsAtUtc { get; set; }
+
+        public int CurrentStreak { get; set; }
+        public int BestStreak { get; set; }
+
         public decimal MonthlyPrice { get; set; }
         public decimal YearlyPrice { get; set; }
         public int YearlyDiscountPercent { get; set; }

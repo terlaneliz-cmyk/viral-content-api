@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ViralContentApi.Data;
 
@@ -10,9 +11,11 @@ using ViralContentApi.Data;
 namespace viral_content_api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260416075011_AddStripeExternalIdsToUserSubscription")]
+    partial class AddStripeExternalIdsToUserSubscription
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.8");
@@ -53,18 +56,19 @@ namespace viral_content_api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ExternalCheckoutSessionId")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Message")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Metadata")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PayloadJson")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Status")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("Success")
@@ -109,8 +113,6 @@ namespace viral_content_api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("UserId");
 
                     b.ToTable("GeneratedContents");
                 });
@@ -216,12 +218,7 @@ namespace viral_content_api.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("UserId")
-                        .HasColumnType("INTEGER");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("UserId");
 
                     b.ToTable("ProcessedWebhookEvents");
                 });
@@ -232,19 +229,7 @@ namespace viral_content_api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("BestStreak")
-                        .HasColumnType("INTEGER");
-
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("CurrentStreak")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("DeactivatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DeactivationReason")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Email")
@@ -255,15 +240,6 @@ namespace viral_content_api.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTime?>("LastActiveDateUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("LastBillingActionAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("LastLoginAt")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -273,31 +249,9 @@ namespace viral_content_api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ReferralCode")
-                        .HasMaxLength(50)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("ReferralCodeCreatedAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("ReferralInviteCount")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("ReferralSignupCount")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("ReferralTrialEndsAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("ReferredByUserId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasMaxLength(20)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Username")
@@ -306,14 +260,6 @@ namespace viral_content_api.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("Email")
-                        .IsUnique();
-
-                    b.HasIndex("ReferralCode")
-                        .IsUnique();
-
-                    b.HasIndex("ReferredByUserId");
 
                     b.ToTable("Users");
                 });
@@ -394,18 +340,17 @@ namespace viral_content_api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("BillingCycle")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CheckoutSessionId")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CustomerId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("EventId")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -414,29 +359,27 @@ namespace viral_content_api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ExternalEventId")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Message")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Payload")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PlanName")
+                        .IsRequired()
                         .HasColumnType("TEXT");
-
-                    b.Property<bool>("Processed")
-                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SubscriptionId")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SubscriptionStatus")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("Success")
@@ -446,11 +389,6 @@ namespace viral_content_api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("EventId")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
 
                     b.ToTable("WebhookEventLogs");
                 });
@@ -468,18 +406,11 @@ namespace viral_content_api.Migrations
 
             modelBuilder.Entity("ViralContentApi.Models.BillingEventLog", b =>
                 {
-                    b.HasOne("ViralContentApi.Models.User", null)
+                    b.HasOne("ViralContentApi.Models.User", "User")
                         .WithMany("BillingEventLogs")
                         .HasForeignKey("UserId");
-                });
 
-            modelBuilder.Entity("ViralContentApi.Models.GeneratedContent", b =>
-                {
-                    b.HasOne("ViralContentApi.Models.User", null)
-                        .WithMany("GeneratedContents")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("ViralContentApi.Models.Post", b =>
@@ -493,13 +424,6 @@ namespace viral_content_api.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("ViralContentApi.Models.ProcessedWebhookEvent", b =>
-                {
-                    b.HasOne("ViralContentApi.Models.User", null)
-                        .WithMany("ProcessedWebhookEvents")
-                        .HasForeignKey("UserId");
-                });
-
             modelBuilder.Entity("ViralContentApi.Models.UserSubscription", b =>
                 {
                     b.HasOne("ViralContentApi.Models.User", "User")
@@ -511,28 +435,15 @@ namespace viral_content_api.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("ViralContentApi.Models.WebhookEventLog", b =>
-                {
-                    b.HasOne("ViralContentApi.Models.User", null)
-                        .WithMany("WebhookEventLogs")
-                        .HasForeignKey("UserId");
-                });
-
             modelBuilder.Entity("ViralContentApi.Models.User", b =>
                 {
                     b.Navigation("AiUsageRecords");
 
                     b.Navigation("BillingEventLogs");
 
-                    b.Navigation("GeneratedContents");
-
                     b.Navigation("Posts");
 
-                    b.Navigation("ProcessedWebhookEvents");
-
                     b.Navigation("UserSubscriptions");
-
-                    b.Navigation("WebhookEventLogs");
                 });
 #pragma warning restore 612, 618
         }

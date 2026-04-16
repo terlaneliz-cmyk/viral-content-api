@@ -13,132 +13,118 @@ public class AuthService : IAuthService
 {
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
+    private readonly IUserSubscriptionService _userSubscriptionService;
 
-    public AuthService(AppDbContext context, IConfiguration configuration)
+    public AuthService(
+        AppDbContext context,
+        IConfiguration configuration,
+        IUserSubscriptionService userSubscriptionService)
     {
         _context = context;
         _configuration = configuration;
+        _userSubscriptionService = userSubscriptionService;
     }
 
-    public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
+    public async Task<AuthResponse> RegisterAsync(RegisterRequest request, string? referralCode = null)
     {
-        var email = request.Email?.Trim();
-        var username = request.Username?.Trim();
+        var email = request.Email?.Trim().ToLowerInvariant();
 
-        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(request.Password))
+        if (string.IsNullOrWhiteSpace(email) || !IsValidEmail(email))
+            throw new Exception("Invalid email format.");
+
+        if (!IsStrongPassword(request.Password))
+            throw new Exception("Password must be 8+ chars, include uppercase, lowercase, number.");
+
+        var exists = await _context.Users.AnyAsync(x => x.Email == email);
+        if (exists)
+            throw new Exception("Email already registered.");
+
+        var effectiveReferralCode = NormalizeReferralCode(
+            !string.IsNullOrWhiteSpace(request.ReferralCode)
+                ? request.ReferralCode
+                : referralCode);
+
+        User? referrer = null;
+
+        if (!string.IsNullOrWhiteSpace(effectiveReferralCode))
         {
-            throw new ArgumentException("Email, username, and password are required.");
-        }
+            referrer = await _context.Users.FirstOrDefaultAsync(x => x.ReferralCode == effectiveReferralCode);
 
-        var existingUser = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email == email || u.Username == username);
-
-        if (existingUser != null)
-        {
-            throw new InvalidOperationException("A user with this email or username already exists.");
+            if (referrer == null)
+                throw new Exception("Referral code not found.");
         }
 
         var user = new User
         {
             Email = email,
-            Username = username,
+            Username = email.Split("@")[0],
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-            Plan = "Free",
             Role = "User",
-            IsActive = true
+            Plan = "Free",
+            IsActive = true,
+            ReferralCode = GenerateReferralCode(email),
+            ReferralCodeCreatedAtUtc = DateTime.UtcNow
         };
+
+        if (referrer != null)
+        {
+            user.ReferredByUserId = referrer.Id;
+            referrer.ReferralSignupCount += 1;
+        }
 
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        var token = GenerateJwtToken(user);
-
-        return new AuthResponse
+        if (referrer != null)
         {
-            Token = token,
-            Username = user.Username,
-            Email = user.Email
-        };
+            _context.BillingEventLogs.Add(new BillingEventLog
+            {
+                UserId = user.Id,
+                EventType = "referral_signup_registered",
+                Status = "success",
+                Success = true,
+                Message = $"Referral applied during signup: {effectiveReferralCode}",
+                Metadata = $"ReferrerUserId={referrer.Id}; ReferralCode={effectiveReferralCode}; NewUserId={user.Id}",
+                CreatedAtUtc = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+
+            if (referrer.ReferralSignupCount >= 3)
+            {
+                await _userSubscriptionService.ActivateReferralRewardTrialAsync(referrer.Id);
+            }
+        }
+
+        return GenerateAuthResponse(user);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
     {
-        var email = request.Email?.Trim();
+        var email = request.Email?.Trim().ToLowerInvariant();
 
-        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(request.Password))
-        {
-            throw new ArgumentException("Email and password are required.");
-        }
-
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+        var user = await _context.Users.FirstOrDefaultAsync(x => x.Email == email);
 
         if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
-        {
-            throw new UnauthorizedAccessException("Invalid email or password.");
-        }
+            throw new Exception("Invalid email or password.");
 
         if (!user.IsActive)
-        {
-            throw new InvalidOperationException("This account has been disabled.");
-        }
+            throw new Exception("Account is disabled.");
 
-        var changed = false;
-
-        if (string.IsNullOrWhiteSpace(user.Plan))
-        {
-            user.Plan = "Free";
-            changed = true;
-        }
-
-        if (string.IsNullOrWhiteSpace(user.Role))
-        {
-            user.Role = "User";
-            changed = true;
-        }
-
-        if (changed)
-        {
-            await _context.SaveChangesAsync();
-        }
-
-        var token = GenerateJwtToken(user);
-
-        return new AuthResponse
-        {
-            Token = token,
-            Username = user.Username,
-            Email = user.Email
-        };
+        return GenerateAuthResponse(user);
     }
 
-    private string GenerateJwtToken(User user)
+    private AuthResponse GenerateAuthResponse(User user)
     {
-        var jwtKey = _configuration["Jwt:Key"];
-        var jwtIssuer = _configuration["Jwt:Issuer"];
-        var jwtAudience = _configuration["Jwt:Audience"];
+        var jwtKey = _configuration["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is missing.");
+        var jwtIssuer = _configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer is missing.");
+        var jwtAudience = _configuration["Jwt:Audience"] ?? throw new InvalidOperationException("Jwt:Audience is missing.");
 
-        if (string.IsNullOrWhiteSpace(jwtKey))
+        var claims = new[]
         {
-            throw new InvalidOperationException("JWT configuration is missing: Jwt:Key");
-        }
-
-        if (string.IsNullOrWhiteSpace(jwtIssuer))
-        {
-            throw new InvalidOperationException("JWT configuration is missing: Jwt:Issuer");
-        }
-
-        if (string.IsNullOrWhiteSpace(jwtAudience))
-        {
-            throw new InvalidOperationException("JWT configuration is missing: Jwt:Audience");
-        }
-
-        var claims = new List<Claim>
-        {
-            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new(JwtRegisteredClaimNames.Email, user.Email),
-            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new(ClaimTypes.Name, user.Username),
-            new(ClaimTypes.Role, string.IsNullOrWhiteSpace(user.Role) ? "User" : user.Role)
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Email, user.Email),
+            new Claim(ClaimTypes.Role, user.Role)
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
@@ -149,9 +135,51 @@ public class AuthService : IAuthService
             audience: jwtAudience,
             claims: claims,
             expires: DateTime.UtcNow.AddDays(7),
-            signingCredentials: creds
-        );
+            signingCredentials: creds);
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        return new AuthResponse
+        {
+            Token = new JwtSecurityTokenHandler().WriteToken(token)
+        };
+    }
+
+    private static string? NormalizeReferralCode(string? referralCode)
+    {
+        if (string.IsNullOrWhiteSpace(referralCode))
+            return null;
+
+        return referralCode.Trim().ToUpperInvariant();
+    }
+
+    private static string GenerateReferralCode(string email)
+    {
+        var basePart = new string(
+            (email ?? "user")
+                .Split('@')[0]
+                .Where(char.IsLetterOrDigit)
+                .Take(8)
+                .ToArray());
+
+        if (string.IsNullOrWhiteSpace(basePart))
+        {
+            basePart = "USER";
+        }
+
+        var randomPart = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        return $"{basePart.ToUpperInvariant()}{randomPart}";
+    }
+
+    private bool IsValidEmail(string email)
+    {
+        return email.Contains("@") && email.Contains(".");
+    }
+
+    private bool IsStrongPassword(string password)
+    {
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 8) return false;
+
+        return password.Any(char.IsUpper)
+            && password.Any(char.IsLower)
+            && password.Any(char.IsDigit);
     }
 }

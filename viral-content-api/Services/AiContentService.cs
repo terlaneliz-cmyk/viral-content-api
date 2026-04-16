@@ -1,17 +1,31 @@
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using OpenAI.Chat;
+using ViralContentApi.Data;
 using ViralContentApi.DTOs;
+using ViralContentApi.Models;
 
 namespace ViralContentApi.Services
 {
     public class AiContentService : IAiContentService
     {
         private readonly IConfiguration _configuration;
+        private readonly IAiUsageLimitService _usageService;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly AppDbContext _context;
 
-        public AiContentService(IConfiguration configuration)
+        public AiContentService(
+            IConfiguration configuration,
+            IAiUsageLimitService usageService,
+            IHttpContextAccessor httpContextAccessor,
+            AppDbContext context)
         {
             _configuration = configuration;
+            _usageService = usageService;
+            _httpContextAccessor = httpContextAccessor;
+            _context = context;
         }
 
         public async Task<GenerateContentResponse> GenerateAsync(GenerateContentRequest request)
@@ -19,17 +33,31 @@ namespace ViralContentApi.Services
             var apiKey = _configuration["OpenAI:ApiKey"];
 
             if (string.IsNullOrWhiteSpace(apiKey))
-            {
                 throw new InvalidOperationException("OpenAI API key not configured.");
-            }
 
-            var client = new ChatClient(model: "gpt-5.4-nano", apiKey: apiKey);
+            var httpContext = _httpContextAccessor.HttpContext;
+            if (httpContext == null)
+                throw new InvalidOperationException("HttpContext is not available.");
+
+            var userIdClaim =
+                httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
+                httpContext.User.FindFirst("nameid")?.Value ??
+                httpContext.User.FindFirst("sub")?.Value;
+
+            if (!int.TryParse(userIdClaim, out var userId) || userId <= 0)
+                throw new InvalidOperationException("Authenticated user ID could not be resolved.");
+
+            var usageStatus = await _usageService.GetUsageStatusAsync(userId);
+            if (usageStatus.RemainingToday <= 0)
+                throw new InvalidOperationException("Daily limit reached.");
+
+            var client = new ChatClient(model: "gpt-4o-mini", apiKey: apiKey);
 
             string prompt = BuildPrompt(request);
 
             ChatCompletion completion = await client.CompleteChatAsync(
                 new SystemChatMessage(
-                    "You write sharp, concrete, high-retention social content. No fluff, no filler, no vague motivational language. Return only valid JSON."
+                    "You are a top 1% viral content creator. Write like a human. No generic advice. No filler phrases. No vague motivational language. Use concrete examples, sharp hooks, short sentences, and platform-native style. Return only valid JSON."
                 ),
                 new UserChatMessage(prompt)
             );
@@ -41,21 +69,43 @@ namespace ViralContentApi.Services
             );
 
             if (string.IsNullOrWhiteSpace(content))
-            {
                 throw new InvalidOperationException("OpenAI returned empty content.");
-            }
 
-            var parsed = JsonSerializer.Deserialize<GenerateContentResponse>(
-                content,
-                new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+            GenerateContentResponse? parsed;
+            try
+            {
+                parsed = JsonSerializer.Deserialize<GenerateContentResponse>(
+                    content,
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to parse OpenAI response. Raw response: {content}", ex);
+            }
 
             if (parsed == null)
-            {
                 throw new InvalidOperationException("Failed to parse OpenAI response.");
-            }
+
+            await _usageService.RecordUsageAsync(userId);
+
+            // ✅ SAVE TO DB
+            var generatedJson = JsonSerializer.Serialize(parsed);
+
+            var dbContent = new GeneratedContent
+            {
+                UserId = userId,
+                Topic = request.Topic,
+                Platform = request.Platform,
+                Tone = request.Tone,
+                Content = generatedJson,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _context.GeneratedContents.Add(dbContent);
+            await _context.SaveChangesAsync();
 
             return parsed;
         }
@@ -102,11 +152,14 @@ namespace ViralContentApi.Services
             sb.AppendLine($"NumberOfVariants: {safeVariantCount}");
             sb.AppendLine();
             sb.AppendLine("Rules:");
-            sb.AppendLine("- Write like a top creator, not like AI.");
+            sb.AppendLine("- Write like a strong human creator, not like AI.");
             sb.AppendLine("- No generic filler.");
             sb.AppendLine("- No abstract nonsense.");
-            sb.AppendLine("- Make the hook strong and specific.");
-            sb.AppendLine("- Make the content useful, concrete, and readable.");
+            sb.AppendLine("- Do not repeat ideas.");
+            sb.AppendLine("- Avoid generic motivation.");
+            sb.AppendLine("- Every sentence must add value.");
+            sb.AppendLine("- Make the hook strong, specific, and scroll-stopping.");
+            sb.AppendLine("- Make the content concrete, readable, and practical.");
             sb.AppendLine("- Keep the CTA natural.");
             sb.AppendLine("- Hashtags should be relevant and not spammy.");
             sb.AppendLine("- Return exactly the requested number of variants.");

@@ -1,112 +1,263 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ViralContentApi.DTOs;
-using ViralContentApi.Services;
+using Microsoft.EntityFrameworkCore;
+using ViralContentApi.Data;
+using ViralContentApi.Models;
 
-namespace ViralContentApi.Controllers
+namespace ViralContentApi.Controllers;
+
+[ApiController]
+[Route("api/admin")]
+[Authorize(Roles = "Admin")]
+public class AdminController : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    [Authorize(Roles = "Admin")]
-    public class AdminController : ControllerBase
+    private readonly AppDbContext _context;
+
+    public AdminController(AppDbContext context)
     {
-        private readonly IAdminService _adminService;
-        private readonly IBillingEventLogService _billingEventLogService;
-        private readonly IBillingHealthService _billingHealthService;
-        private readonly INotificationHealthService _notificationHealthService;
+        _context = context;
+    }
 
-        public AdminController(
-            IAdminService adminService,
-            IBillingEventLogService billingEventLogService,
-            IBillingHealthService billingHealthService,
-            INotificationHealthService notificationHealthService)
+    [HttpGet("users")]
+    public async Task<IActionResult> GetUsers([FromQuery] string? search)
+    {
+        var query = _context.Users
+            .Include(u => u.UserSubscriptions)
+            .Include(u => u.AiUsageRecords)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(search))
         {
-            _adminService = adminService;
-            _billingEventLogService = billingEventLogService;
-            _billingHealthService = billingHealthService;
-            _notificationHealthService = notificationHealthService;
+            var lowered = search.Trim().ToLower();
+
+            query = query.Where(x =>
+                x.Email.ToLower().Contains(lowered) ||
+                x.Username.ToLower().Contains(lowered));
         }
 
-        [HttpGet("dashboard")]
-        public async Task<ActionResult<AdminDashboardResponse>> GetDashboard()
-        {
-            var dashboard = await _adminService.GetDashboardAsync();
-            return Ok(dashboard);
-        }
-
-        [HttpGet("ai-analytics")]
-        public async Task<ActionResult<AdminAiAnalyticsResponse>> GetAiAnalytics([FromQuery] DateTime? from, [FromQuery] DateTime? to)
-        {
-            var result = await _adminService.GetAiAnalyticsAsync(from, to);
-            return Ok(result);
-        }
-
-        [HttpGet("users")]
-        public async Task<ActionResult<IEnumerable<AdminUserResponse>>> GetUsers()
-        {
-            var users = await _adminService.GetUsersAsync();
-            return Ok(users);
-        }
-
-        [HttpGet("billing-events")]
-        public async Task<ActionResult<IEnumerable<BillingEventLogResponse>>> GetBillingEvents([FromQuery] int count = 100)
-        {
-            var result = await _billingEventLogService.GetRecentAsync(count);
-            return Ok(result);
-        }
-
-        [HttpGet("billing-health")]
-        public ActionResult<BillingHealthResponse> GetBillingHealth()
-        {
-            var result = _billingHealthService.GetHealth();
-            return Ok(result);
-        }
-
-        [HttpGet("notification-health")]
-        public ActionResult<NotificationHealthResponse> GetNotificationHealth()
-        {
-            var result = _notificationHealthService.GetHealth();
-            return Ok(result);
-        }
-
-        [HttpPut("users/{id}/plan")]
-        public async Task<IActionResult> UpdateUserPlan(int id, [FromBody] AdminUpdateUserPlanRequest request)
-        {
-            var result = await _adminService.UpdateUserPlanAsync(id, request.Plan);
-
-            return Ok(new
+        var users = await query
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(u => new
             {
-                message = "User plan updated successfully.",
-                userId = result.UserId,
-                plan = result.Plan,
-                dailyLimit = result.DailyLimit
-            });
-        }
+                u.Id,
+                u.Email,
+                u.Username,
+                u.Plan,
+                u.Role,
+                u.IsActive,
+                u.CreatedAt,
+                DailyUsage = u.AiUsageRecords.Count(),
+                Subscription = u.UserSubscriptions
+                    .OrderByDescending(s => s.CreatedAtUtc)
+                    .Select(s => new
+                    {
+                        s.PlanName,
+                        s.Status,
+                        s.CancelAtPeriodEnd
+                    })
+                    .FirstOrDefault()
+            })
+            .ToListAsync();
 
-        [HttpPut("users/{id}/role")]
-        public async Task<IActionResult> UpdateUserRole(int id, [FromBody] AdminUpdateUserRoleRequest request)
+        return Ok(users);
+    }
+
+    [HttpGet("analytics")]
+    public async Task<IActionResult> GetAnalytics()
+    {
+        var totalUsers = await _context.Users.CountAsync();
+        var free = await _context.Users.CountAsync(x => x.Plan == "Free");
+        var pro = await _context.Users.CountAsync(x => x.Plan == "Pro");
+        var creator = await _context.Users.CountAsync(x => x.Plan == "Creator");
+
+        var totalGenerations = await _context.AiUsageRecords.CountAsync();
+        var mrr = (pro * 19) + (creator * 49);
+
+        var canceling = await _context.UserSubscriptions
+            .CountAsync(x => x.CancelAtPeriodEnd);
+
+        return Ok(new
         {
-            var result = await _adminService.UpdateUserRoleAsync(id, request.Role);
+            totalUsers,
+            free,
+            pro,
+            creator,
+            todayGenerations = totalGenerations,
+            mrr,
+            churnSignals = canceling
+        });
+    }
 
-            return Ok(new
-            {
-                message = "User role updated successfully.",
-                userId = result.UserId,
-                role = result.Role
-            });
-        }
-
-        [HttpPut("users/{id}/active-status")]
-        public async Task<IActionResult> UpdateUserActiveStatus(int id, [FromBody] AdminUpdateUserActiveStatusRequest request)
+    [HttpPost("set-plan")]
+    public async Task<IActionResult> SetPlan([FromQuery] int userId, [FromQuery] string plan)
+    {
+        if (userId <= 0 || string.IsNullOrWhiteSpace(plan))
         {
-            var result = await _adminService.UpdateUserActiveStatusAsync(id, request.IsActive);
-
-            return Ok(new
-            {
-                message = "User active status updated successfully.",
-                userId = result.UserId,
-                isActive = result.IsActive
-            });
+            return BadRequest(new { message = "Valid userId and plan are required." });
         }
+
+        var user = await _context.Users.FindAsync(userId);
+        if (user == null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        user.Plan = plan.Trim();
+
+        _context.BillingEventLogs.Add(new BillingEventLog
+        {
+            UserId = userId,
+            EventType = "admin_set_plan",
+            Status = "success",
+            Success = true,
+            Message = $"Plan changed to {user.Plan}",
+            Metadata = $"Plan changed to {user.Plan}",
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "Plan updated." });
+    }
+
+    [HttpPost("reset-usage")]
+    public async Task<IActionResult> ResetUsage([FromQuery] int userId)
+    {
+        if (userId <= 0)
+        {
+            return BadRequest(new { message = "Valid userId is required." });
+        }
+
+        var records = _context.AiUsageRecords.Where(x => x.UserId == userId);
+        _context.AiUsageRecords.RemoveRange(records);
+
+        _context.BillingEventLogs.Add(new BillingEventLog
+        {
+            UserId = userId,
+            EventType = "admin_reset_usage",
+            Status = "success",
+            Success = true,
+            Message = "Usage reset",
+            Metadata = "All AI usage records removed by admin",
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "Usage reset." });
+    }
+
+    [HttpPost("deactivate")]
+    public async Task<IActionResult> Deactivate([FromQuery] int userId)
+    {
+        if (userId <= 0)
+        {
+            return BadRequest(new { message = "Valid userId is required." });
+        }
+
+        var user = await _context.Users.FindAsync(userId);
+        if (user == null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        user.IsActive = false;
+
+        _context.BillingEventLogs.Add(new BillingEventLog
+        {
+            UserId = userId,
+            EventType = "admin_deactivate_user",
+            Status = "success",
+            Success = true,
+            Message = "User deactivated",
+            Metadata = "User account deactivated by admin",
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "User deactivated." });
+    }
+
+    [HttpGet("webhooks")]
+public async Task<IActionResult> GetWebhookLogs(
+    [FromQuery] string? type,
+    [FromQuery] bool? processed)
+{
+    var query = _context.WebhookEventLogs.AsQueryable();
+
+    if (!string.IsNullOrWhiteSpace(type))
+    {
+        var t = type.ToLower();
+        query = query.Where(x => x.EventType.ToLower().Contains(t));
+    }
+
+    if (processed.HasValue)
+    {
+        query = query.Where(x => x.Processed == processed.Value);
+    }
+
+    var logs = await query
+        .OrderByDescending(x => x.CreatedAtUtc)
+        .Take(200)
+        .ToListAsync();
+
+    return Ok(logs);
+}
+
+[HttpGet("charts")]
+public async Task<IActionResult> GetCharts()
+{
+    var usersByPlan = await _context.Users
+        .GroupBy(x => x.Plan)
+        .Select(g => new
+        {
+            plan = g.Key,
+            count = g.Count()
+        })
+        .ToListAsync();
+
+    var usageByUser = await _context.AiUsageRecords
+        .GroupBy(x => x.UserId)
+        .Select(g => new
+        {
+            userId = g.Key,
+            count = g.Count()
+        })
+        .OrderByDescending(x => x.count)
+        .Take(10)
+        .ToListAsync();
+
+    return Ok(new
+    {
+        usersByPlan,
+        topUsersByUsage = usageByUser
+    });
+}
+
+[HttpPost("webhooks/retry")]
+public async Task<IActionResult> RetryWebhook([FromQuery] int id)
+{
+    var log = await _context.WebhookEventLogs.FindAsync(id);
+
+    if (log == null)
+        return NotFound(new { message = "Webhook not found." });
+
+    log.Processed = false;
+    log.Success = false;
+    log.Message = "Marked for retry by admin";
+
+    await _context.SaveChangesAsync();
+
+    return Ok(new { message = "Webhook marked for retry." });
+}
+
+
+    [HttpGet("billing-log")]
+    public async Task<IActionResult> GetBillingLogs()
+    {
+        var logs = await _context.BillingEventLogs
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(100)
+            .ToListAsync();
+
+        return Ok(logs);
     }
 }

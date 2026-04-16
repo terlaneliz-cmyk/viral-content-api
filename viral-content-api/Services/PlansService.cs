@@ -145,6 +145,10 @@ namespace ViralContentApi.Services
             var usage = await _aiUsageLimitService.GetUsageStatusAsync(userId);
             var upgrades = GetAvailableUpgrades(plan.Name);
 
+            var now = DateTime.UtcNow;
+            var isTrialActive = user.ReferralTrialEndsAtUtc.HasValue &&
+                                user.ReferralTrialEndsAtUtc.Value > now;
+
             return new MyPlanResponse
             {
                 PlanName = plan.Name,
@@ -153,6 +157,11 @@ namespace ViralContentApi.Services
                 UsedToday = usage.UsedToday,
                 RemainingToday = usage.RemainingToday,
                 IsLimitReached = usage.RemainingToday <= 0,
+                ReferralBonus = usage.ReferralBonus,
+                IsReferralTrialActive = isTrialActive,
+                ReferralTrialEndsAtUtc = user.ReferralTrialEndsAtUtc,
+                CurrentStreak = user.CurrentStreak,
+                BestStreak = user.BestStreak,
                 MonthlyPrice = plan.MonthlyPrice,
                 YearlyPrice = plan.YearlyPrice,
                 YearlyDiscountPercent = plan.YearlyDiscountPercent,
@@ -236,116 +245,117 @@ namespace ViralContentApi.Services
         }
 
         public async Task<CreateCheckoutSessionResponse?> CreateCheckoutSessionAsync(int userId, CreateCheckoutSessionRequest request)
-{
-    var user = await _context.Users
-        .AsNoTracking()
-        .FirstOrDefaultAsync(x => x.Id == userId);
-
-    if (user == null)
-    {
-        return null;
-    }
-
-    if (string.IsNullOrWhiteSpace(user.Email))
-    {
-        throw new InvalidOperationException("The current user does not have a valid email address.");
-    }
-
-    var targetPlanName = ResolveTargetPlanName(
-        request.TargetPlanName,
-        request.PlanName);
-
-    if (string.IsNullOrWhiteSpace(targetPlanName))
-    {
-        throw new ArgumentException("TargetPlanName is required.");
-    }
-
-    var preview = await GetUpgradePreviewAsync(userId, new PlanUpgradePreviewRequest
-    {
-        TargetPlanName = targetPlanName,
-        BillingCycle = request.BillingCycle ?? "monthly"
-    });
-
-    if (preview == null)
-    {
-        throw new InvalidOperationException("Upgrade preview could not be created for this plan change.");
-    }
-
-    if (preview.IsSamePlan)
-    {
-        throw new InvalidOperationException($"You are already on the {preview.TargetPlanName} plan.");
-    }
-
-    if (preview.IsDowngrade)
-    {
-        throw new InvalidOperationException(
-            $"Downgrade checkout is not supported through this endpoint. Current plan: {preview.CurrentPlanName}, target plan: {preview.TargetPlanName}.");
-    }
-
-    if (!preview.IsUpgrade)
-    {
-        throw new InvalidOperationException(
-            $"This plan change is not a valid upgrade. Current plan: {preview.CurrentPlanName}, target plan: {preview.TargetPlanName}.");
-    }
-
-    var successUrl = !string.IsNullOrWhiteSpace(request.SuccessUrl)
-        ? request.SuccessUrl
-        : _configuration["StripeUrls:SuccessUrl"];
-
-    var cancelUrl = !string.IsNullOrWhiteSpace(request.CancelUrl)
-        ? request.CancelUrl
-        : _configuration["StripeUrls:CancelUrl"];
-
-    if (string.IsNullOrWhiteSpace(successUrl))
-    {
-        throw new InvalidOperationException("Stripe success URL is missing.");
-    }
-
-    if (string.IsNullOrWhiteSpace(cancelUrl))
-    {
-        throw new InvalidOperationException("Stripe cancel URL is missing.");
-    }
-
-    try
-    {
-        var providerResponse = await _billingProviderService.CreateCheckoutSessionAsync(new BillingCheckoutSessionRequest
         {
-            UserId = userId,
-            CustomerEmail = user.Email,
-            PlanName = preview.TargetPlanName,
-            BillingCycle = preview.BillingCycle,
-            Price = preview.Price,
-            Currency = preview.Currency,
-            StripePriceLookupKey = preview.StripePriceLookupKey,
-            SuccessUrl = successUrl,
-            CancelUrl = cancelUrl
-        });
+            var user = await _context.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == userId);
 
-        if (providerResponse == null)
-        {
-            throw new InvalidOperationException("Billing provider returned no checkout session.");
+            if (user == null)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(user.Email))
+            {
+                throw new InvalidOperationException("The current user does not have a valid email address.");
+            }
+
+            var targetPlanName = ResolveTargetPlanName(
+                request.TargetPlanName,
+                request.PlanName);
+
+            if (string.IsNullOrWhiteSpace(targetPlanName))
+            {
+                throw new ArgumentException("TargetPlanName is required.");
+            }
+
+            var preview = await GetUpgradePreviewAsync(userId, new PlanUpgradePreviewRequest
+            {
+                TargetPlanName = targetPlanName,
+                BillingCycle = request.BillingCycle ?? "monthly"
+            });
+
+            if (preview == null)
+            {
+                throw new InvalidOperationException("Upgrade preview could not be created for this plan change.");
+            }
+
+            if (preview.IsSamePlan)
+            {
+                throw new InvalidOperationException($"You are already on the {preview.TargetPlanName} plan.");
+            }
+
+            if (preview.IsDowngrade)
+            {
+                throw new InvalidOperationException(
+                    $"Downgrade checkout is not supported through this endpoint. Current plan: {preview.CurrentPlanName}, target plan: {preview.TargetPlanName}.");
+            }
+
+            if (!preview.IsUpgrade)
+            {
+                throw new InvalidOperationException(
+                    $"This plan change is not a valid upgrade. Current plan: {preview.CurrentPlanName}, target plan: {preview.TargetPlanName}.");
+            }
+
+            var successUrl = !string.IsNullOrWhiteSpace(request.SuccessUrl)
+                ? request.SuccessUrl
+                : _configuration["StripeUrls:SuccessUrl"];
+
+            var cancelUrl = !string.IsNullOrWhiteSpace(request.CancelUrl)
+                ? request.CancelUrl
+                : _configuration["StripeUrls:CancelUrl"];
+
+            if (string.IsNullOrWhiteSpace(successUrl))
+            {
+                throw new InvalidOperationException("Stripe success URL is missing.");
+            }
+
+            if (string.IsNullOrWhiteSpace(cancelUrl))
+            {
+                throw new InvalidOperationException("Stripe cancel URL is missing.");
+            }
+
+            try
+            {
+                var providerResponse = await _billingProviderService.CreateCheckoutSessionAsync(new BillingCheckoutSessionRequest
+                {
+                    UserId = userId,
+                    CustomerEmail = user.Email,
+                    PlanName = preview.TargetPlanName,
+                    BillingCycle = preview.BillingCycle,
+                    Price = preview.Price,
+                    Currency = preview.Currency,
+                    StripePriceLookupKey = preview.StripePriceLookupKey,
+                    SuccessUrl = successUrl,
+                    CancelUrl = cancelUrl
+                });
+
+                if (providerResponse == null)
+                {
+                    throw new InvalidOperationException("Billing provider returned no checkout session.");
+                }
+
+                var subscription = await _userSubscriptionService.CreateOrUpdatePendingSubscriptionAsync(
+                    userId,
+                    preview.TargetPlanName,
+                    preview.BillingCycle,
+                    preview.Price,
+                    preview.Currency,
+                    preview.StripePriceLookupKey ?? string.Empty,
+                    providerResponse.SessionId ?? string.Empty);
+
+                providerResponse.Subscription = subscription;
+
+                return providerResponse;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Checkout session could not be created for this plan change. Details: {ex.Message}",
+                    ex);
+            }
         }
 
-        var subscription = await _userSubscriptionService.CreateOrUpdatePendingSubscriptionAsync(
-            userId,
-            preview.TargetPlanName,
-            preview.BillingCycle,
-            preview.Price,
-            preview.Currency,
-            preview.StripePriceLookupKey ?? string.Empty,
-            providerResponse.SessionId ?? string.Empty);
-
-        providerResponse.Subscription = subscription;
-
-        return providerResponse;
-    }
-    catch (Exception ex)
-    {
-        throw new InvalidOperationException(
-            $"Checkout session could not be created for this plan change. Details: {ex.Message}",
-            ex);
-    }
-}
         private Dictionary<string, int> GetConfiguredLimits()
         {
             var nestedPlans = _configuration

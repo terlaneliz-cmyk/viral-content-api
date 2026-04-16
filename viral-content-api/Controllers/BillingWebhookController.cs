@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Stripe;
+using ViralContentApi.Data;
 using ViralContentApi.DTOs;
 using ViralContentApi.Services;
 
@@ -11,15 +13,18 @@ namespace ViralContentApi.Controllers;
 public class BillingWebhookController : ControllerBase
 {
     private readonly IConfiguration _configuration;
+    private readonly AppDbContext _context;
     private readonly IUserSubscriptionService _userSubscriptionService;
     private readonly ILogger<BillingWebhookController> _logger;
 
     public BillingWebhookController(
         IConfiguration configuration,
+        AppDbContext context,
         IUserSubscriptionService userSubscriptionService,
         ILogger<BillingWebhookController> logger)
     {
         _configuration = configuration;
+        _context = context;
         _userSubscriptionService = userSubscriptionService;
         _logger = logger;
     }
@@ -28,7 +33,10 @@ public class BillingWebhookController : ControllerBase
     [HttpPost("stripe")]
     public async Task<IActionResult> Receive()
     {
-        var stripeWebhookSecret = _configuration["StripeBilling:WebhookSecret"];
+        var stripeWebhookSecret =
+            _configuration["StripeBilling:WebhookSecret"] ??
+            _configuration["Stripe:WebhookSecret"];
+
         var fallbackWebhookSecret = _configuration["BillingWebhook:Secret"];
 
         string requestBody;
@@ -139,7 +147,8 @@ public class BillingWebhookController : ControllerBase
         }
 
         var userId = GetIntFromMetadata(session, "metadata", "userId");
-        var planName = GetStringFromMetadata(session, "metadata", "planName");
+        var rawPlanName = GetStringFromMetadata(session, "metadata", "planName");
+        var planName = NormalizePlanName(rawPlanName);
         var billingCycle = GetStringFromMetadata(session, "metadata", "billingCycle");
 
         if (userId <= 0)
@@ -148,26 +157,79 @@ public class BillingWebhookController : ControllerBase
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(planName))
+        {
+            _logger.LogWarning("checkout.session.completed missing valid planName metadata.");
+            return;
+        }
+
         var paymentStatus = GetString(session, "payment_status");
         var status = string.Equals(paymentStatus, "paid", StringComparison.OrdinalIgnoreCase)
             ? "active"
             : "pending";
 
+        var sessionId = GetString(session, "id");
+        var subscriptionId = GetString(session, "subscription");
+        var customerId = GetString(session, "customer");
+
         await _userSubscriptionService.SyncSubscriptionDetailsAsync(
             userId,
             status,
-            GetString(session, "subscription"),
-            GetString(session, "customer"),
+            subscriptionId,
+            customerId,
             planName,
             billingCycle,
             null,
             null,
             false,
             null,
-            GetString(session, "id"),
+            sessionId,
             null,
             null,
             null);
+
+        if (!string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!string.Equals(planName, "Pro", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(planName, "Creator", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var existingSubscription = await _context.UserSubscriptions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x =>
+                x.UserId == userId &&
+                x.ExternalSubscriptionId == (subscriptionId ?? string.Empty) &&
+                x.ExternalCustomerId == (customerId ?? string.Empty) &&
+                string.Equals(x.PlanName, planName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(x.Status, "active", StringComparison.OrdinalIgnoreCase));
+
+        if (existingSubscription != null)
+        {
+            _logger.LogInformation(
+                "User {UserId} already has matching active subscription {SubscriptionId}. Skipping duplicate activation.",
+                userId,
+                subscriptionId);
+            return;
+        }
+
+        await _userSubscriptionService.ActivateSubscriptionAsync(
+            userId,
+            planName,
+            string.IsNullOrWhiteSpace(billingCycle) ? "monthly" : billingCycle,
+            subscriptionId,
+            customerId,
+            null,
+            null);
+
+        _logger.LogInformation(
+            "Activated plan {PlanName} for user {UserId} from checkout.session.completed.",
+            planName,
+            userId);
     }
 
     private async Task HandleCustomerSubscriptionCreatedAsync(JsonElement root)
@@ -179,7 +241,7 @@ public class BillingWebhookController : ControllerBase
         }
 
         var userId = GetIntFromMetadata(subscription, "metadata", "userId");
-        var planName = GetStringFromMetadata(subscription, "metadata", "planName");
+        var planName = NormalizePlanName(GetStringFromMetadata(subscription, "metadata", "planName"));
         var billingCycle = GetStringFromMetadata(subscription, "metadata", "billingCycle");
 
         if (userId <= 0)
@@ -214,7 +276,7 @@ public class BillingWebhookController : ControllerBase
         }
 
         var userId = GetIntFromMetadata(subscription, "metadata", "userId");
-        var planName = GetStringFromMetadata(subscription, "metadata", "planName");
+        var planName = NormalizePlanName(GetStringFromMetadata(subscription, "metadata", "planName"));
         var billingCycle = GetStringFromMetadata(subscription, "metadata", "billingCycle");
 
         if (userId <= 0)
@@ -249,7 +311,7 @@ public class BillingWebhookController : ControllerBase
         }
 
         var userId = GetIntFromMetadata(subscription, "metadata", "userId");
-        var planName = GetStringFromMetadata(subscription, "metadata", "planName");
+        var planName = NormalizePlanName(GetStringFromMetadata(subscription, "metadata", "planName"));
         var billingCycle = GetStringFromMetadata(subscription, "metadata", "billingCycle");
 
         if (userId <= 0)
@@ -289,8 +351,9 @@ public class BillingWebhookController : ControllerBase
             0;
 
         var planName =
-            GetStringFromPath(root, "data", "object", "parent", "subscription_details", "metadata", "planName") ??
-            GetStringFromPath(root, "data", "object", "lines", "data", 0, "metadata", "planName");
+            NormalizePlanName(
+                GetStringFromPath(root, "data", "object", "parent", "subscription_details", "metadata", "planName") ??
+                GetStringFromPath(root, "data", "object", "lines", "data", 0, "metadata", "planName"));
 
         var billingCycle =
             GetStringFromPath(root, "data", "object", "parent", "subscription_details", "metadata", "billingCycle") ??
@@ -323,6 +386,25 @@ public class BillingWebhookController : ControllerBase
             null,
             null,
             null);
+    }
+
+    private static string? NormalizePlanName(string? planName)
+    {
+        if (string.IsNullOrWhiteSpace(planName))
+        {
+            return planName;
+        }
+
+        var normalized = planName.Trim().ToLowerInvariant();
+
+        return normalized switch
+        {
+            "pro" => "Pro",
+            "creator" => "Creator",
+            "free" => "Free",
+            "agency" => "Agency",
+            _ => planName.Trim()
+        };
     }
 
     private static string? GetString(JsonElement element, string propertyName)

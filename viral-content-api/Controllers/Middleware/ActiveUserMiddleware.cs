@@ -1,44 +1,36 @@
 using System.Security.Claims;
-using Microsoft.EntityFrameworkCore;
 using ViralContentApi.Data;
 
-namespace ViralContentApi.Middleware
+namespace ViralContentApi.Middleware;
+
+public class ActiveUserMiddleware
 {
-    public class ActiveUserMiddleware
+    private readonly RequestDelegate _next;
+
+    public ActiveUserMiddleware(RequestDelegate next)
     {
-        private readonly RequestDelegate _next;
+        _next = next;
+    }
 
-        public ActiveUserMiddleware(RequestDelegate next)
-        {
-            _next = next;
-        }
+    public async Task InvokeAsync(HttpContext context, AppDbContext db)
+    {
+        var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-        public async Task InvokeAsync(HttpContext context, AppDbContext dbContext)
+        if (!string.IsNullOrWhiteSpace(userId))
         {
-            if (context.User.Identity?.IsAuthenticated == true)
+            var user = await db.Users.FindAsync(int.Parse(userId));
+
+            if (user == null || !user.IsActive)
             {
-                var userIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                                  ?? context.User.FindFirst("sub")?.Value;
-
-                if (int.TryParse(userIdClaim, out var userId))
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsJsonAsync(new
                 {
-                    var user = await dbContext.Users
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(x => x.Id == userId);
-
-                    if (user == null || !user.IsActive)
-                    {
-                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        await context.Response.WriteAsJsonAsync(new
-                        {
-                            message = "Your account is disabled."
-                        });
-                        return;
-                    }
-                }
+                    message = "Session expired or account inactive."
+                });
+                return;
             }
-
-            await _next(context);
         }
+
+        await _next(context);
     }
 }
